@@ -3,6 +3,7 @@
 import sys
 import re
 import os.path
+import glob
 
 # TODO: read extensions, header from files found in sys.path?
 
@@ -72,34 +73,51 @@ def makeTop(output=sys.stdout, show_whitespace="false"):
     # print out the file header
     header = '''
 \\documentclass{article}
+\\usepackage{layout}
 \\usepackage[hmargin=1in,vmargin=1in]{geometry}
 \\usepackage{listings}
 \\usepackage{color}
-
+% \\usepackage{courier}
 % For better handling of unicode (Latin characters, anyway)
 \\IfFileExists{lmodern.sty}{\\usepackage{lmodern}}{}
 \\usepackage[T1]{fontenc}
 \\usepackage[utf8]{inputenc}
+%\\usepackage[german]{babel}
+
+\\usepackage[colorlinks=true,linkcolor=blue]{hyperref}
 
 \\lstset{
-    numbers=left,                   % where to put the line-numbers
-    numberstyle=\\small \\ttfamily \\color[rgb]{0.4,0.4,0.4},
+    belowcaptionskip=1\\baselineskip,
+    xleftmargin=\\parindent,
+    % numbers=left,                   % where to put the line-numbers
+    % numberstyle=\\small \\ttfamily \\color[rgb]{0.4,0.4,0.4},
                 % style used for the linenumbers
     showspaces=__WHITESPACE__,               % show spaces adding special underscores
     showstringspaces=false,         % underline spaces within strings
     showtabs=__WHITESPACE__,                 % show tabs within strings adding particular underscores
     frame=lines,                    % add a frame around the code
-    tabsize=4,                        % default tabsize: 4 spaces
+    tabsize=2,                        % default tabsize: 4 spaces
     breaklines=true,                % automatic line breaking
-    breakatwhitespace=false,        % automatic breaks should only happen at whitespace
-    basicstyle=\\ttfamily,
-    %identifierstyle=\\color[rgb]{0.3,0.133,0.133},   % colors in variables and function names, if desired.
-    keywordstyle=\\color[rgb]{0.133,0.133,0.6},
-    commentstyle=\\color[rgb]{0.133,0.545,0.133},
-    stringstyle=\\color[rgb]{0.627,0.126,0.941},
+    breakatwhitespace=true,        % automatic breaks should only happen at whitespace
+    basicstyle=\\large\\ttfamily\\color[rgb]{0,0,0},
+    identifierstyle=\\Large\\color[rgb]{0.3,0.133,0.133},   % colors in variables and function names, if desired.
+    keywordstyle=\\Large\\color[rgb]{0.133,0.133,0.6},
+    commentstyle=\\large\\color[rgb]{0.133,0.545,0.133},
+    stringstyle=\\large\\color[rgb]{0.627,0.126,0.941},
 }
+\\linespread{1.2}
+\\setlength{\\voffset}{-2.0cm}
+\\setlength{\\hoffset}{-2.5cm}
+\\setlength{\\footskip}{0cm}
+\\setlength{\\textheight}{750pt}
+\\setlength{\\textwidth}{610pt}
+\\setlength{\\marginparwidth}{5pt}
+
 
 \\begin{document}
+% \\layout
+\\tableofcontents
+
 '''
     print(header.replace('__WHITESPACE__', show_whitespace), file=output)
 
@@ -107,14 +125,49 @@ def makeTop(output=sys.stdout, show_whitespace="false"):
 def makeBottom(output=sys.stdout):
     print("\\end{document}", file=output)
 
+PREVIOUS_NAMES = []
+PARTS_NAME = ['section', 'subsection', 'subsubsection', 'paragraph', 'subparagraph']
+def make_parts_name(filename):
+    '''Return a list of (name, part_name). Such as [('client', 'subsection'), ('__init__', 'subsubsection)]'''
+    filename = re.sub('^/', '', filename)
+
+    global PREVIOUS_NAMES
+
+    names = filename.split('/')
+    if len(names) > 5:
+        t = names[:3]
+        s = '/'.join(names[4:])
+        t.append(s)
+        names = t
+
+    j = 0
+    for (i, name) in enumerate(PREVIOUS_NAMES):
+        if names[i] != name:
+            j = i
+            break
+
+    rst = []
+    for i in range(j, len(names)):
+        rst.append([names[i], PARTS_NAME[i]])
+
+    PREVIOUS_NAMES = names
+    return rst
+
 
 def addListing(filename, custom_heading=None, output=sys.stdout):
     heading = filename
     if custom_heading is not None:
         heading = custom_heading
 
+    # remove DIR part
+    heading = re.sub('%s/'%DIR, '', heading)
     heading_escaped = re.sub(specials_re, r'\\\1', heading)
-    print("\\section*{%s}" % heading_escaped, file=output)
+
+    parts = make_parts_name(heading_escaped)
+    print("\\newpage", file=output)
+    for part in parts:
+        # print("\\section{%s}" % heading_escaped, file=output)
+        print("\\%s[%s]{%s}" % (part[1], part[0], heading_escaped), file=output)
 
     ext = filename.split('.')[-1]
     lang = exts.get(ext, '')
@@ -150,6 +203,50 @@ def main():
         addListing(infile)
     makeBottom()
 
+DIR = '/'
+def process_files(files):
+    # Check existence of all files first
+    for infile in files:
+        if not os.path.isfile(infile):
+            sys.exit("File not found: %s" % infile)
+
+    # Make the file (output to STDOUT)
+    makeTop(show_whitespace="false")
+    for infile in files:
+        addListing(infile)
+    makeBottom()
+
+
+def process_dir(dir):
+    files = glob.glob('%s/**' % (dir), recursive=True)
+    # process_files(files)
+    print(files)
+    print(len(files))
+
+def process_python_dir(dir):
+    files = glob.glob('%s/**' % (dir), recursive=True)
+
+    files = [f for f in files if os.path.isfile(f)]
+    files = [f for f in files if f.endswith('py')]
+
+    process_files(files)
+
+def process_tensorflow_dir(dir):
+    files = glob.glob('%s/**' % (dir), recursive=True)
+    ignores = ['kernel_tests', 'keras', 'debug']
+    files = [f for f in files if not re.search('/%s/' % '|'.join(ignores), f)]
+
+    files = [f for f in files if os.path.isfile(f)]
+    files = [f for f in files if f.endswith('py')]
+
+    # print(files)
+    # print(len(files))
+    process_files(files)
+
 
 if __name__ == "__main__":
-    main()
+    # main()
+    dir = sys.argv[1]
+    DIR = dir
+    process_tensorflow_dir(dir)
+    # process_python_dir(dir)
